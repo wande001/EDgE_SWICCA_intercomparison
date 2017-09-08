@@ -117,9 +117,12 @@ def makeOutputNameSeasonal(var, mod, uncertaintyOutput, GHM="PCRGLOBWB"):
 
 def readForecastData(var, mod, obsLon, obsLat, startTime, endTime, varName = "scii_category", GHM="PCRGLOBWB", lead=0, quant=0):
   dates = generateDateRange(datetime.datetime(1993,1,1), addMonthsToDate(datetime.datetime(2011,12,31),lead))
+  ## Select start and end of forecast simulation time period
   start = np.argmin(dates < startTime)
   end = np.argmax(dates > endTime)
+  ## Create seasonal input file name
   inputFile = makeInputNameSeasonal(var, mod, GHM)
+  ## Read seasonal forecast data for start to end, for quant (between 0 and 5) and for lead month (between 0-6)
   ncFile = nc.Dataset(inputFile)
   data = ncFile.variables[varName][range(start, end),quant,lead,:,:]
   ncFile.close()
@@ -127,10 +130,14 @@ def readForecastData(var, mod, obsLon, obsLat, startTime, endTime, varName = "sc
   return dataPoints
 
 def readReferenceData(obsLon, obsLat, startTime, endTime, varName = "scii_category", GHM="PCRGLOBWB", lead=0):
+  ## Read the data from the reference NetCDF file and report back as Numpy Array
   dates = generateDateRange(addMonthsToDate(datetime.datetime(1993,1,1),lead), datetime.datetime(2011,12,31))
+  ## Select start and end of simulation time period
   start = np.argmin(dates < startTime)
   end = np.argmax(dates > endTime)
+  ## Create reference file name
   referenceFile = makeRefFileName(GHM)
+  ## Read reference data
   refFile = nc.Dataset(referenceFile)
   refData = refFile.variables[varName][range(start, end),:,:]
   lat = refFile.variables["y"][:]
@@ -140,6 +147,7 @@ def readReferenceData(obsLon, obsLat, startTime, endTime, varName = "scii_catego
   return dataPoints
 
 def readCoordinatesData(GHM="PCRGLOBWB"):
+  ## Read coordinates and time properties from the reference file
   referenceFile = makeRefFileName(GHM)
   refFile = nc.Dataset(referenceFile)
   time = refFile.variables["time"][:]
@@ -164,6 +172,7 @@ def readObservationsStations(fileName):
 
 
 def readObservationsData(fileName, matchOrder, stationNums, startTime, endTime):
+  ## Function to read observations from txt file and conver to Numpy array
   f = open(fileName)
   lines=f.readlines()
   ## Extract observations and times
@@ -171,10 +180,12 @@ def readObservationsData(fileName, matchOrder, stationNums, startTime, endTime):
   obsData = np.zeros((numLines, len(stationNums))) - 999.
   obsTimes = []
   lineCount = 0
+  ## Loop over line numbers
   for line in range(numLines):
     tempLine = lines[line+1].split("\t")
     tempTime = str(tempLine[0]).split('-')
     currDate = datetime.datetime(int(tempTime[0]),int(tempTime[1]),int(tempTime[2]))
+    ## Save values only if date is within the range of the modelled time period
     if currDate >= startTime and currDate <= endTime:
       obsTimes.append(currDate)
       tempData = np.zeros((len(stationNums)))
@@ -275,14 +286,17 @@ def data2NetCDFnoTime(ncFile,varName,var4D,varField, quant=0, lead=0):
   rootgrp.close()
     
 def writeMetricsToFile(outputFile, metrics, varNames, quant, lead, var4D):
+  ## write metrics to NetCDF output file
   for var in range(len(varNames)):
     data2NetCDFnoTime(outputFile,varNames[var],var4D[var], metrics[var], quant=quant, lead=lead)	
 
 def writeAcToFile(outputFile, metrics, varNames, quant, lead, var4D):
+  ## Write AC to NetCDF output file
   data2NetCDFnoTime(outputFile,varNames,var4D, metrics, quant=quant, lead=lead)
 
 ########## Matching functions #####################
 def matchObsPointsModel(lat, lon, shapeFileName = "MIP_Stations_LAEA/MIP_Stations_LAEA.shp"):
+  ## Match coordinate of observations to model's mask. Used to extract the correct modelled timeseries
   sf = shapefile.Reader(shapeFileName)
   points = sf.shapes()
   fields = sf.records()
@@ -291,7 +305,9 @@ def matchObsPointsModel(lat, lon, shapeFileName = "MIP_Stations_LAEA/MIP_Station
   Lon = []
   Lat = []
   stationS = []
+  ## Loop over points
   for point in points:
+    ## Find point with minimal distance to observation location
     selY = np.argmin(np.abs(lat - point.points[0][1]))
     selX = np.argmin(np.abs(lon - point.points[0][0]))
     Lat.append(point.points[0][1])
@@ -303,6 +319,7 @@ def matchObsPointsModel(lat, lon, shapeFileName = "MIP_Stations_LAEA/MIP_Station
   return obsLat, obsLon, Lat, Lon, stationS
 
 def matchObsPointsObservation(stationNums, shapeFileName = "MIP_Stations_LAEA/MIP_Stations_LAEA.shp"):
+  ## Matches the Observation points to a shape file ID
   sf = shapefile.Reader(shapeFileName)
   points = sf.shapes()
   fields = sf.records()
@@ -354,6 +371,7 @@ def forecastProbability(pred):
   return forecastProb
 
 def computeMetrics(refData, forecastData, quant, limit=0.2):
+  ## Main function to compute metrics, will call other functions for the individual metrics, returns an object with all metrics
   brierout = brier(refData, forecastData, quant=quant+1, limit=limit)
   PODout, FARout, POFDout, TSout = PODandFAR(refData, forecastData, quant=quant+1, limit=limit)
   forecastProbout = forecastProbability(forecastData)  
@@ -384,15 +402,16 @@ def catchmentStatistics(inputData, catchmentSWICCA):
 #### Main functions to handle data processing ###########
 
 def seasonalUncertainty(var, mod, GHM, startTime, endTime):
-	###### Reading and Matching observation data
+    ## Reading and Matching observation data
     stationNums = readObservationsStations("MIP_Q_series.txt")
     matchOrder = matchObsPointsObservation(stationNums)
-	## Vars for output
+    ## Vars for output
     varNames = ["brier", "POD", "FAR", "POFD", "TS","forecastProb","AC"]
     longNameS = ["Brier Score", "Probability of detection", "False Alarm Rate", "Probability of False Detection", "Threat Score", "Forecast probability for quantile", "Anomaly correlation"]
     varUnits = ["-", "-", "-", "-", "-", "-", "-"]
+    ## Define if output variable is 4D, dimensions, lon, lat, initialization time and quantile
     var4D = [True, True, True, True, True, True, False]
-    #####
+    ## Point to output directories of seasonal forecasts
     if GHM == 'PCRGLOBWB':
         uncertaintyOutput = "/home/land1/niko/EDGE/"
     else:
@@ -402,30 +421,41 @@ def seasonalUncertainty(var, mod, GHM, startTime, endTime):
       os.mkdir(uncertaintyOutput)
     except:
       pass
+    ## Point to location  of reference (baseline) simulation
     referenceFile = makeRefFileName(GHM)
     outputFile = makeOutputNameSeasonal(var, mod, uncertaintyOutput, GHM)
     print outputFile
+    ## Read coordinates of stations
     time, lat, lon = readCoordinatesData(GHM)
     obsLat, obsLon, stationLat, stationLon, stations = matchObsPointsModel(lat=lat, lon=lon, shapeFileName = "MIP_Stations_LAEA/MIP_Stations_LAEA.shp")
+    ## Create output file
     createNetCDFnoTime(outputFile, varNames, varUnits, stations, stationLat, stationLon, var4D, longName= longNameS, loop=True, quantDim = quantDim)
 
     for lead in range(6):
+      ## Read Observational time series
       data, time = readObservationsData("MIP_Q_series.txt", matchOrder, stationNums, startTime = addMonthsToDate(startTime,lead), endTime=addMonthsToDate(endTime, lead))
+      ## Aggregate data to monthly values
       monthData, monthTimes = aggregateToMonth(data, time)
+      ## Convert to quintile data
       quintileData = computeQuintiles(monthData)
+      ## Loop over the quantiles, input NetCDF files have a 4 dimensional structure or lon, lat, time, quantile for Reference and 5D for forecast, lon, lat time, quantile, Lead
       for quant in range(quantDim):
         print var, modelS[mod], lead, quant
+        ## Read forecast data for certaint GHM, quantile and lead
         forecastData = readForecastData(var, mod, obsLon, obsLat, startTime, endTime, varName = "prob_quintile_dist", GHM=GHM, quant=quant-1, lead=lead)
+        ## For first quantile output matrix should be created
         if quant == 0:
           ensForecast = forecastData * (quant-1)
+        ## New data added to the existing output matrix
         else:
           ensForecast += forecastData * (quant-1)
         refData = readReferenceData(obsLon, obsLat, startTime, endTime, varName = "scii_category", GHM=GHM, lead=lead)
-        ## Forecast validation against reference data, disabled for now
-        # metrics = computeMetrics(refData, forecastData, quant)
-        ## Forecast validation against observations
-        metrics = computeMetrics(quintileData, forecastData, quant)
+        ## Forecast validation against reference data
+        metrics = computeMetrics(refData, forecastData, quant)
+        ## Forecast validation against observations, disabled for now
+        # metrics = computeMetrics(quintileData, forecastData, quant)
         writeMetricsToFile(outputFile,metrics, varNames[:-1], quant=quant, lead=lead, var4D=var4D[:-1])
+        ## If last quantile write AC correlation for all quantiles
         if quant == 4:
           acMetrics = correlation2D(quintileData, ensForecast)
           writeAcToFile(outputFile, acMetrics, varNames[-1], quant=quant, lead=lead, var4D=var4D[-1])       
